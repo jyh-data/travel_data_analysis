@@ -1,18 +1,18 @@
 -- =============================================================
 -- 「智游北京」核心分析 SQL 集
--- 覆盖：北极星指标 / AARRR漏斗 / 渠道ROI / 留存Cohort / RFM分层 /
+-- 覆盖：北极星指标 / AARRR漏斗 / 渠道质量 / 留存Cohort / RFM分层 /
 --       环比异动归因 / 复购分析 / 产品结构
--- 数据库：MySQL 8.0+（使用 CTE 与窗口函数）
--- 设计原则：每条 SQL 对应一个真实业务问题，注释里写的是"为什么这么做"
+-- 数据库：MySQL 8.0+（用到 CTE、窗口函数、条件聚合）
 -- =============================================================
 USE zhiyou;
 
 -- -------------------------------------------------------------
--- 0. 北极星指标：周活跃规划用户（WAU-Plan）+ 周环比
---    LAG() 取上一周的值算环比，用于监控增长趋势
+-- Q0. 北极星指标：周活跃规划用户（WAU-Plan）+ 周环比
+--     选"成功生成一条行程"当北极星：这是用户感知到产品价值的第一个瞬间，
+--     前置于收藏、下单和分享。LAG() 取上一周的值算环比。
 -- -------------------------------------------------------------
 WITH weekly AS (
-  SELECT DATE_FORMAT(event_time, '%x-%v') AS week_no,
+  SELECT DATE_FORMAT(event_time, '%x-%v') AS week_no,   -- ISO 周，周一起算
          COUNT(DISTINCT user_id)          AS wau_plan
   FROM events
   WHERE event_name = 'ai_plan'
@@ -26,8 +26,8 @@ FROM weekly
 ORDER BY week_no;
 
 -- -------------------------------------------------------------
--- 1. 整体漏斗（会话级口径）
---    COUNT(DISTINCT CASE WHEN ...)：只对满足条件的行去重计数
+-- Q1. 整体漏斗（会话级口径）
+--     每个环节统计"发生过该事件的会话数"，session_id 去重。
 -- -------------------------------------------------------------
 SELECT
   COUNT(DISTINCT CASE WHEN event_name='app_launch'   THEN session_id END) AS 启动,
@@ -39,7 +39,7 @@ SELECT
 FROM events;
 
 -- -------------------------------------------------------------
--- 2. 分渠道漏斗：识别"量大利薄"渠道
+-- Q2. 分渠道漏斗：哪个渠道"量大利薄"
 -- -------------------------------------------------------------
 SELECT channel,
   COUNT(DISTINCT session_id) AS 会话数,
@@ -52,23 +52,27 @@ GROUP BY channel
 ORDER BY 会话支付转化率_pct DESC;
 
 -- -------------------------------------------------------------
--- 3. 渠道 ROI：注册量 / 付费转化 / 净GMV / 退款率
+-- Q3. 渠道质量评估：注册量 / 付费转化 / 净GMV / 退款率
+--     （没有投放成本数据，算不了 ROI，这里只看质量指标）
+--     注意"付费用户数"要限定 is_paid=1，只下过单没支付的不算付费。
 -- -------------------------------------------------------------
 SELECT u.channel,
-       COUNT(DISTINCT u.user_id)                                       AS 注册用户数,
-       COUNT(DISTINCT o.user_id)                                       AS 付费用户数,
-       ROUND(COUNT(DISTINCT o.user_id)/COUNT(DISTINCT u.user_id)*100, 2) AS 注册付费转化_pct,
+       COUNT(DISTINCT u.user_id)                                                     AS 注册用户数,
+       COUNT(DISTINCT CASE WHEN o.is_paid = 1 THEN o.user_id END)                    AS 付费用户数,
+       ROUND(COUNT(DISTINCT CASE WHEN o.is_paid = 1 THEN o.user_id END)
+           / COUNT(DISTINCT u.user_id) * 100, 2)                                     AS 注册付费转化_pct,
        ROUND(SUM(CASE WHEN o.is_paid=1 AND o.is_refunded=0 THEN o.amount ELSE 0 END), 0) AS 净GMV,
        ROUND(SUM(CASE WHEN o.is_paid=1 AND o.is_refunded=1 THEN 1 ELSE 0 END)
-           / SUM(o.is_paid) * 100, 2)                                  AS 退款率_pct
+           / SUM(o.is_paid) * 100, 2)                                                AS 退款率_pct
 FROM users u
 LEFT JOIN orders o ON u.user_id = o.user_id
 GROUP BY u.channel
 ORDER BY 净GMV DESC;
 
 -- -------------------------------------------------------------
--- 4. 留存分析（Cohort）
---    思路：先算每个用户首次活跃日 d0 → 连接事件表算间隔天数 → 条件计数
+-- Q4. 留存分析（注册周 Cohort）
+--     先算每个用户的首次活跃日 d0，再按 d0 所在周分组，
+--     看第 1 / 7 / 30 天还有多少人回来。
 -- -------------------------------------------------------------
 WITH first_day AS (
   SELECT user_id, MIN(DATE(event_time)) AS d0
@@ -76,19 +80,44 @@ WITH first_day AS (
   WHERE event_name = 'app_launch'
   GROUP BY user_id
 )
-SELECT f.d0 AS cohort_date,
-       COUNT(DISTINCT e.user_id) AS 新增活跃,
-       ROUND(COUNT(DISTINCT IF(DATEDIFF(DATE(e.event_time), f.d0)=1,  e.user_id, NULL)) / COUNT(DISTINCT e.user_id)*100, 1) AS 次日留存,
-       ROUND(COUNT(DISTINCT IF(DATEDIFF(DATE(e.event_time), f.d0)=7,  e.user_id, NULL)) / COUNT(DISTINCT e.user_id)*100, 1) AS 七日留存,
-       ROUND(COUNT(DISTINCT IF(DATEDIFF(DATE(e.event_time), f.d0)=30, e.user_id, NULL)) / COUNT(DISTINCT e.user_id)*100, 1) AS 三十日留存
+SELECT DATE_FORMAT(f.d0, '%x-%v') AS 注册周,
+       COUNT(DISTINCT f.user_id)  AS 新增活跃,
+       ROUND(COUNT(DISTINCT IF(DATEDIFF(DATE(e.event_time), f.d0)=1,  e.user_id, NULL)) / COUNT(DISTINCT f.user_id)*100, 1) AS 次日留存_pct,
+       ROUND(COUNT(DISTINCT IF(DATEDIFF(DATE(e.event_time), f.d0)=7,  e.user_id, NULL)) / COUNT(DISTINCT f.user_id)*100, 1) AS 七日留存_pct,
+       ROUND(COUNT(DISTINCT IF(DATEDIFF(DATE(e.event_time), f.d0)=30, e.user_id, NULL)) / COUNT(DISTINCT f.user_id)*100, 1) AS 三十日留存_pct
 FROM first_day f
 JOIN events e ON e.user_id = f.user_id AND e.event_name = 'app_launch'
-GROUP BY f.d0
-ORDER BY f.d0;
+GROUP BY 注册周
+ORDER BY 注册周;
+
+-- 汇总口径（和 Python 脚本输出的三个数字一一对应）：
+-- 数据只到 2026-08-31，8 月初之后注册的用户没有完整的 30 天观察窗，
+-- 直接算会把 30 留拉低，所以 30 留只统计 d0 <= 2026-08-01 的用户。
+WITH first_day AS (
+  SELECT user_id, MIN(DATE(event_time)) AS d0
+  FROM events
+  WHERE event_name = 'app_launch'
+  GROUP BY user_id
+),
+flags AS (
+  SELECT f.user_id, f.d0,
+         MAX(IF(DATEDIFF(DATE(e.event_time), f.d0)=1,  1, 0)) AS ret_d1,
+         MAX(IF(DATEDIFF(DATE(e.event_time), f.d0)=7,  1, 0)) AS ret_d7,
+         MAX(IF(DATEDIFF(DATE(e.event_time), f.d0)=30, 1, 0)) AS ret_d30
+  FROM first_day f
+  JOIN events e ON e.user_id = f.user_id AND e.event_name = 'app_launch'
+  GROUP BY f.user_id, f.d0
+)
+SELECT ROUND(AVG(ret_d1)*100, 1) AS 次留_pct,
+       ROUND(AVG(ret_d7)*100, 1) AS 七留_pct,
+       ROUND(AVG(IF(d0 <= '2026-08-01', ret_d30, NULL))*100, 1) AS 三十留_pct
+FROM flags;
 
 -- -------------------------------------------------------------
--- 5. RFM 付费用户分层（NTILE 三分位）
---    NTILE(3) 把用户按指标切成三档：R 越小越好(升序)，F/M 越大越好(降序)
+-- Q5. RFM 付费用户分层（NTILE 三分位）
+--     R 越小越好（升序），F / M 越大越好（降序）。
+--     踩过的坑：NTILE 遇到同值会随机分档，多跑几次结果会变，
+--     所以排序键里加了 M 和 user_id 兜底，保证每次跑结果一样。
 -- -------------------------------------------------------------
 WITH rfm AS (
   SELECT user_id,
@@ -101,10 +130,9 @@ WITH rfm AS (
 ),
 score AS (
   SELECT *,
-         -- 加次要排序键消除同值随机分配，保证结果可复现
-         NTILE(3) OVER (ORDER BY R ASC,  M DESC, user_id) AS r_q,   -- R 第1档 = 最近消费
-         NTILE(3) OVER (ORDER BY F DESC, M DESC, user_id) AS f_q,
-         NTILE(3) OVER (ORDER BY M DESC, user_id)         AS m_q
+         NTILE(3) OVER (ORDER BY R ASC,  M DESC, user_id) AS r_q,   -- 第1档 = 最近消费
+         NTILE(3) OVER (ORDER BY F DESC, M DESC, user_id) AS f_q,   -- 第1档 = 频次最高
+         NTILE(3) OVER (ORDER BY M DESC, user_id)         AS m_q    -- 第1档 = 金额最高
   FROM rfm
 )
 SELECT
@@ -121,25 +149,36 @@ GROUP BY 分层
 ORDER BY 人均消费 DESC;
 
 -- -------------------------------------------------------------
--- 6. 异动归因：支付 UV 下滑时的排查
---    第一层：按天看环比；第二层：下滑日按渠道下钻
+-- Q6. 异动归因：支付 UV 下滑时的两层排查
+--     第一层：全渠道每天的支付 UV 环比，定位是哪一天开始掉的；
+--     第二层：拿着那天按渠道拆开，和前一天对比，看是谁拖下来的。
 -- -------------------------------------------------------------
+-- 第一层：按天看环比
 WITH daily AS (
-  SELECT DATE(event_time) AS dt, channel,
+  SELECT DATE(event_time) AS dt,
          COUNT(DISTINCT CASE WHEN event_name='pay_order' THEN user_id END) AS pay_uv
   FROM events
-  GROUP BY dt, channel
+  GROUP BY dt
 )
-SELECT dt, channel, pay_uv,
-       LAG(pay_uv) OVER (PARTITION BY channel ORDER BY dt)                AS prev_uv,
-       ROUND((pay_uv / LAG(pay_uv) OVER (PARTITION BY channel ORDER BY dt) - 1) * 100, 1) AS dod_pct
+SELECT dt, pay_uv,
+       LAG(pay_uv) OVER (ORDER BY dt) AS prev_uv,
+       ROUND((pay_uv / LAG(pay_uv) OVER (ORDER BY dt) - 1) * 100, 1) AS dod_pct
 FROM daily
 WHERE dt >= '2026-08-20'
-ORDER BY dt, channel;
+ORDER BY dt;
+
+-- 第二层：下滑日的渠道拆解（这里的日期换成第一层查出来的那天）
+SELECT channel,
+       COUNT(DISTINCT IF(DATE(event_time)='2026-08-25' AND event_name='pay_order', user_id, NULL)) AS 当日支付UV,
+       COUNT(DISTINCT IF(DATE(event_time)='2026-08-24' AND event_name='pay_order', user_id, NULL)) AS 前日支付UV
+FROM events
+WHERE DATE(event_time) IN ('2026-08-24', '2026-08-25')
+GROUP BY channel
+ORDER BY 当日支付UV - 前日支付UV;
 
 -- -------------------------------------------------------------
--- 7. 复购分析：首单后 30 天内的复购率
---    LEAD() 取同一用户的下一单时间，判断复购间隔
+-- Q7. 复购分析：首单后 30 天内的复购率
+--     LEAD() 取同一用户的下一单时间，和首单时间算间隔。
 -- -------------------------------------------------------------
 WITH seq AS (
   SELECT user_id, create_time,
@@ -156,7 +195,7 @@ SELECT
 FROM seq;
 
 -- -------------------------------------------------------------
--- 8. 产品结构：订单量 / 客单价 / 净GMV / 退款率
+-- Q8. 产品结构：订单量 / 客单价 / 净GMV / 退款率
 -- -------------------------------------------------------------
 SELECT product_type,
        COUNT(*)                                            AS 订单量,
