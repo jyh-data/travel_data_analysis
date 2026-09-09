@@ -7,14 +7,14 @@
 Python负责北极星、漏斗、渠道质量、留存、产品结构五部分。
 
 用法：在仓库根目录运行  python 03_Pandas数据分析.py
-默认读 data_sample/ 里的样例数据；换成全量数据时改下面三行路径即可。
+默认读 data/ 目录里的全量数据（users.csv / events.csv / orders.csv）。
 """
 import pandas as pd
 
 # ---------- 0. 数据加载 ----------
-USER_CSV  = "data_sample/users_sample.csv"
-EVENT_CSV = "data_sample/events_sample.csv"
-ORDER_CSV = "data_sample/orders_sample.csv"
+USER_CSV  = "data/users.csv"
+EVENT_CSV = "data/events.csv"
+ORDER_CSV = "data/orders.csv"
 
 users = pd.read_csv(USER_CSV,  parse_dates=["register_time"])
 ev    = pd.read_csv(EVENT_CSV, parse_dates=["event_time"])

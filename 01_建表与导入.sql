@@ -13,7 +13,7 @@ DROP TABLE IF EXISTS users;
 CREATE TABLE users (
     user_id       INT          PRIMARY KEY COMMENT '用户ID',
     register_time DATETIME     COMMENT '注册时间',
-    channel       VARCHAR(32)  COMMENT '获客渠道：自然流量/抖音信息流/小红书种草/微信分享裂变/高校地推',
+    channel       VARCHAR(32)  COMMENT '获客渠道：自然/抖音/小红书/微信/地推（简称）',
     city_tier     VARCHAR(16)  COMMENT '城市线级',
     device        VARCHAR(16)  COMMENT '设备系统：iOS/Android',
     age           TINYINT      COMMENT '年龄'
@@ -27,13 +27,15 @@ CREATE TABLE users (
 -- add_favorite  收藏景点
 -- create_order  提交订单（门票/酒店/一日游套餐）
 -- pay_order     支付成功
+-- channel 是冗余列（和 users.channel 一致），为的是分渠道取数时不用 JOIN；
+-- 渠道名用简称（自然/抖音/小红书/微信/地推），把 events.csv 压到 25MB 以内方便上传
 DROP TABLE IF EXISTS events;
 CREATE TABLE events (
     session_id  INT          COMMENT '会话ID（同一次访问内的行为归为一个会话）',
     user_id     INT          COMMENT '用户ID',
     event_time  DATETIME     COMMENT '事件时间',
     event_name  VARCHAR(32)  COMMENT '事件名',
-    channel     VARCHAR(32)  COMMENT '渠道（冗余字段，取数时不用再 JOIN 用户表）',
+    channel     VARCHAR(32)  COMMENT '渠道（冗余列，与 users.channel 一致）',
     INDEX idx_session (session_id),
     INDEX idx_user_time (user_id, event_time),
     INDEX idx_event (event_name, event_time)
@@ -55,19 +57,18 @@ CREATE TABLE orders (
 ) COMMENT='订单表';
 
 -- ---------- 数据导入（把 /your_path/ 换成实际路径） ----------
--- 注意行尾：仓库里这份 CSV 是 Windows 的 CRLF 行尾，所以这里写 '\r\n'。
--- 如果你的 CSV 是 Mac/Linux 生成的 LF 行尾，要改回 '\n'，
+-- 注意行尾：仓库里这份 CSV 是 LF 行尾（'\n'）。
+-- 如果你用 Excel 等工具另存过、变成了 Windows 的 CRLF 行尾，要改成 '\r\n'，
 -- 否则每行最后一个字段会带一个看不见的 \r —— users.age 会报错，
 -- events/orders 的渠道字段也会被污染（分组时冒出"重复的"渠道）。
 LOAD DATA INFILE '/your_path/users.csv'  INTO TABLE users
-  FIELDS TERMINATED BY ',' ENCLOSED BY '"' LINES TERMINATED BY '\r\n' IGNORE 1 ROWS;
+  FIELDS TERMINATED BY ',' ENCLOSED BY '"' LINES TERMINATED BY '\n' IGNORE 1 ROWS;
 
 LOAD DATA INFILE '/your_path/events.csv' INTO TABLE events
-  FIELDS TERMINATED BY ',' ENCLOSED BY '"' LINES TERMINATED BY '\r\n' IGNORE 1 ROWS
-  (session_id, user_id, event_time, event_name, channel);
+  FIELDS TERMINATED BY ',' ENCLOSED BY '"' LINES TERMINATED BY '\n' IGNORE 1 ROWS;
 
 LOAD DATA INFILE '/your_path/orders.csv' INTO TABLE orders
-  FIELDS TERMINATED BY ',' ENCLOSED BY '"' LINES TERMINATED BY '\r\n' IGNORE 1 ROWS;
+  FIELDS TERMINATED BY ',' ENCLOSED BY '"' LINES TERMINATED BY '\n' IGNORE 1 ROWS;
 
 -- 如果导入被 secure_file_priv 拦住：
 --   SHOW VARIABLES LIKE 'secure_file_priv';
