@@ -7,18 +7,24 @@
 Python负责北极星、漏斗、渠道质量、留存、产品结构五部分。
 
 用法：在仓库根目录运行  python 03_Pandas数据分析.py
-默认读 data/ 目录里的全量数据（users.csv / events.csv / orders.csv）。
+默认读 data_sample/ 目录里的全量数据（users.csv / events.csv / orders.csv）。
 """
 import pandas as pd
 
 # ---------- 0. 数据加载 ----------
-USER_CSV  = "data/users.csv"
-EVENT_CSV = "data/events.csv"
-ORDER_CSV = "data/orders.csv"
+USER_CSV  = "data_sample/users.csv"
+EVENT_CSV = "data_sample/events.csv"
+ORDER_CSV = "data_sample/orders.csv"
 
 users = pd.read_csv(USER_CSV,  parse_dates=["register_time"])
 ev    = pd.read_csv(EVENT_CSV, parse_dates=["event_time"])
 od    = pd.read_csv(ORDER_CSV, parse_dates=["create_time"])
+
+# 渠道名对齐：events 里用简称（抖音/微信/...），orders 里是全称（抖音信息流/...），
+# 不映射的话下面按渠道拼接两张表的结果会对不上索引、整列变 NaN
+CH_MAP = {"抖音信息流": "抖音", "微信分享裂变": "微信", "小红书种草": "小红书",
+          "自然流量": "自然", "高校地推": "地推"}
+od["channel"] = od.channel.map(CH_MAP)
 
 # ---------- 1. 北极星指标：周活跃规划用户（WAU-Plan） ----------
 # 按周聚合（周一起算，和 SQL 里 %x-%v 的 ISO 周口径一致）
