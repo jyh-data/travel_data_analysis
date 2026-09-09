@@ -1,12 +1,12 @@
 -- =============================================================
--- 「京游」智能行程规划产品 · 用户行为分析数据库
+-- 「智游北京」智能行程规划产品 · 用户行为分析数据库
 -- 数据库：MySQL 8.0+
 -- 说明：三张核心表 —— 用户表(users)、埋点事件表(events)、订单表(orders)
 -- 数据周期：2026-06-01 ~ 2026-08-31
 -- =============================================================
 
-CREATE DATABASE IF NOT EXISTS jingyou DEFAULT CHARSET utf8mb4;
-USE jingyou;
+CREATE DATABASE IF NOT EXISTS zhiyou DEFAULT CHARSET utf8mb4;
+USE zhiyou;
 
 -- ---------- 用户表 ----------
 DROP TABLE IF EXISTS users;
@@ -20,7 +20,7 @@ CREATE TABLE users (
 ) COMMENT='用户维度表';
 
 -- ---------- 埋点事件表 ----------
--- 事件口径（对应「京游」核心用户路径）：
+-- 事件口径（对应「智游北京」核心用户路径）：
 -- app_launch    启动小程序
 -- ai_plan       输入需求/选择主题标签，发起AI行程规划
 -- view_spot     查看景点/行程详情页

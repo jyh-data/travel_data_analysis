@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-「京游」智能行程规划产品 · 用户行为分析脚本（Python 部分）
+「智游北京」智能行程规划产品 · 用户行为分析脚本（Python 部分）
 作者：纪语恒
 依赖：pandas（只用基础语法：read_csv / groupby / merge / 透视）
 说明：RFM 分层与复购分析由 SQL 完成（见 02_核心分析SQL.sql 的 Q5/Q7），
