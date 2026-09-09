@@ -91,27 +91,29 @@ GROUP BY 注册周
 ORDER BY 注册周;
 
 -- 汇总口径（和 Python 脚本输出的三个数字一一对应）：
--- 数据只到 2026-08-31，8 月初之后注册的用户没有完整的 30 天观察窗，
--- 直接算会把 30 留拉低，所以 30 留只统计 d0 <= 2026-08-01 的用户。
+-- 先算每个注册周的留存率，再取平均；
+-- 只统计"整周都有完整 N 天观察窗"的注册周——数据只到 2026-08-31，
+-- 比如最后一周注册的连次日都未必能观察到，算进来会把留存拉低。
 WITH first_day AS (
   SELECT user_id, MIN(DATE(event_time)) AS d0
   FROM events
   WHERE event_name = 'app_launch'
   GROUP BY user_id
 ),
-flags AS (
-  SELECT f.user_id, f.d0,
-         MAX(IF(DATEDIFF(DATE(e.event_time), f.d0)=1,  1, 0)) AS ret_d1,
-         MAX(IF(DATEDIFF(DATE(e.event_time), f.d0)=7,  1, 0)) AS ret_d7,
-         MAX(IF(DATEDIFF(DATE(e.event_time), f.d0)=30, 1, 0)) AS ret_d30
+cohort AS (
+  SELECT DATE_SUB(f.d0, INTERVAL WEEKDAY(f.d0) DAY) AS wk_start,   -- 所在周的周一
+         COUNT(DISTINCT f.user_id) AS base,
+         COUNT(DISTINCT IF(DATEDIFF(DATE(e.event_time), f.d0)=1,  e.user_id, NULL)) AS d1,
+         COUNT(DISTINCT IF(DATEDIFF(DATE(e.event_time), f.d0)=7,  e.user_id, NULL)) AS d7,
+         COUNT(DISTINCT IF(DATEDIFF(DATE(e.event_time), f.d0)=30, e.user_id, NULL)) AS d30
   FROM first_day f
   JOIN events e ON e.user_id = f.user_id AND e.event_name = 'app_launch'
-  GROUP BY f.user_id, f.d0
+  GROUP BY wk_start
 )
-SELECT ROUND(AVG(ret_d1)*100, 1) AS 次留_pct,
-       ROUND(AVG(ret_d7)*100, 1) AS 七留_pct,
-       ROUND(AVG(IF(d0 <= '2026-08-01', ret_d30, NULL))*100, 1) AS 三十留_pct
-FROM flags;
+SELECT ROUND(AVG(IF(wk_start <= '2026-08-24', d1/base, NULL))*100, 1) AS 次留_pct,
+       ROUND(AVG(IF(wk_start <= '2026-08-17', d7/base, NULL))*100, 1) AS 七留_pct,
+       ROUND(AVG(IF(wk_start <= '2026-07-26', d30/base, NULL))*100, 1) AS 三十留_pct
+FROM cohort;
 
 -- -------------------------------------------------------------
 -- Q5. RFM 付费用户分层（NTILE 三分位）

@@ -58,16 +58,16 @@ m["cohort"] = m["d0"].dt.to_period("W").dt.start_time
 cohort = m.groupby(["cohort", "day_n"]).user_id.nunique().unstack()   # 行=注册周，列=第N天
 retention = cohort.div(cohort[0], axis=0)                             # 除以基数 = 留存率
 
-# 汇总的次留/7留/30留按人头算（和 SQL Q4 汇总口径一致）：
-# 数据只到 2026-08-31，8 月初之后注册的用户没有完整 30 天窗口，
-# 直接算会把 30 留拉低，所以 30 留只统计 d0 <= 2026-08-01 的用户
-base = first.size
-d1  = m.loc[m.day_n == 1, "user_id"].nunique()
-d7  = m.loc[m.day_n == 7, "user_id"].nunique()
-d30 = m.loc[(m.day_n == 30) & (m.d0 <= "2026-08-01"), "user_id"].nunique()
-base30 = (first <= "2026-08-01").sum()
-print("【留存】平均次留 {:.1f}% | 7留 {:.1f}% | 30留 {:.1f}%".format(
-    d1 / base * 100, d7 / base * 100, d30 / base30 * 100))
+# 汇总的次留/7留/30留：先算每个注册周的留存率再取平均（和 SQL Q4 汇总口径一致）。
+# 只统计"整周都有完整 N 天观察窗"的注册周——数据只到 2026-08-31，
+# 比如最后一周注册的连次日都未必能观察到，算进来会把留存拉低。
+# 注意 fillna(0)：某个注册周如果第 N 天一个人都没回来，透视表里是 NaN，
+# 直接 mean() 会把这一周跳过（等于从分母里消失），填 0 才是"该周留存 0%"
+end = launch["date"].max()
+r1  = retention.loc[retention.index <= end - pd.Timedelta(days=7),  1].fillna(0).mean()
+r7  = retention.loc[retention.index <= end - pd.Timedelta(days=13), 7].fillna(0).mean()
+r30 = retention.loc[retention.index <= end - pd.Timedelta(days=36), 30].fillna(0).mean()
+print("【留存】平均次留 {:.1f}% | 7留 {:.1f}% | 30留 {:.1f}%".format(r1 * 100, r7 * 100, r30 * 100))
 
 # ---------- 5. 产品结构 ----------
 prod = od.groupby("product_type").agg(订单量=("order_id", "count"), 客单价=("amount", "mean"))
