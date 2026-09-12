@@ -23,7 +23,7 @@
 **事件链路**：`app_launch` → `ai_plan`（发起AI规划）→ `view_spot`（看详情）→
 `add_favorite`（收藏）→ `create_order` → `pay_order`
 
-> **仓库 `data_sample/` 里就是上表中的全量数据，clone 后按下方「如何复现」操作，即可原样跑出 README 中的所有结论数字**。
+> 仓库 `data_sample/` 里就是上表中的全量数据，clone 后按下方「如何复现」操作，即可原样跑出 README 中的所有结论数字。
 
 ## 指标体系
 
